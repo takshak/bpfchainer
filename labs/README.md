@@ -13,8 +13,9 @@ chain with a live orchestrator.
 | # | Directory      | You will…                                              |
 |---|----------------|--------------------------------------------------------|
 | 1 | `01-container` | Build a tiny container runtime (create / enter / exec / destroy) using cgroups + namespaces |
+| 2 | `02-cgroup-bpf-attach` | Compile, load, and attach a `cgroup/connect4` BPF program to a Lab 01 container cgroup |
 
-*(More exercises coming: cgroup BPF attachment, inheritance, the chainer, the orchestrator.)*
+*(More exercises coming: inheritance, the chainer, the orchestrator.)*
 
 ## Environment
 

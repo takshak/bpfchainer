@@ -12,7 +12,7 @@ chain with a live orchestrator.
 
 | # | Directory      | You will…                                              |
 |---|----------------|--------------------------------------------------------|
-| 1 | `01-container` | Build a tiny container runtime (create / enter / destroy) using cgroups + namespaces |
+| 1 | `01-container` | Build a tiny container runtime (create / enter / exec / destroy) using cgroups + namespaces |
 
 *(More exercises coming: cgroup BPF attachment, inheritance, the chainer, the orchestrator.)*
 

@@ -1,12 +1,13 @@
 #!/bin/bash
 # container-runtime.sh — a tiny container runtime, built step by step.
 #
-# Iteration: create / enter / destroy. Host networking.
+# Iteration: create / enter / exec / destroy. Host networking.
 # Default init: sleep infinity.
 #
 # Usage:
 #   ./container-runtime.sh create  <name>
 #   ./container-runtime.sh enter   <name>
+#   ./container-runtime.sh exec    <name> <command...>
 #   ./container-runtime.sh destroy <name>
 #
 # What "create" does:
@@ -22,8 +23,41 @@ set -euo pipefail
 STATE_DIR=/run/containers
 CG_ROOT=/sys/fs/cgroup/lab
 
+usage() {
+    echo "usage: $0 {create|enter|exec|destroy} <name> [command...]" >&2
+}
+
+require_root() {
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        echo "must run as root" >&2
+        exit 1
+    fi
+}
+
+validate_name() {
+    local name=${1:?missing container name}
+    if [[ ! $name =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+        echo "invalid container name: $name" >&2
+        echo "allowed characters: letters, numbers, '.', '_', '-'" >&2
+        exit 1
+    fi
+}
+
+ensure_cgroup_root() {
+    if [[ ! -d /sys/fs/cgroup || ! -f /sys/fs/cgroup/cgroup.controllers ]]; then
+        echo "cgroup v2 is required at /sys/fs/cgroup" >&2
+        exit 1
+    fi
+    mkdir -p "$CG_ROOT"
+}
+
 create_cgroup() {
     local name=$1
+    ensure_cgroup_root
+    if [[ -e "$STATE_DIR/$name.pid" || -d "$CG_ROOT/$name" ]]; then
+        echo "container '$name' already exists" >&2
+        exit 1
+    fi
     mkdir -p "$CG_ROOT/$name"
     # Move the current shell (this script) into the slice.
     # Everything we start from here on — including the container's
@@ -63,6 +97,7 @@ start_container() {
 
 enter_container() {
     local name=${1:?usage: $0 enter <name>}
+    validate_name "$name"
     local pidfile="$STATE_DIR/$name.pid"
 
     [[ -f $pidfile ]] || { echo "no such container: $name" >&2; exit 1; }
@@ -83,8 +118,33 @@ enter_container() {
     exec nsenter -t "$pid" -p -m -u bash
 }
 
+exec_container() {
+    local name=${1:?usage: $0 exec <name> <command...>}
+    shift
+    validate_name "$name"
+    if [[ $# -eq 0 ]]; then
+        echo "usage: $0 exec <name> <command...>" >&2
+        exit 1
+    fi
+
+    local pidfile="$STATE_DIR/$name.pid"
+
+    [[ -f $pidfile ]] || { echo "no such container: $name" >&2; exit 1; }
+    local pid; pid=$(cat "$pidfile")
+
+    kill -0 "$pid" 2>/dev/null || { echo "container '$name' is dead" >&2; exit 1; }
+
+    # Like enter_container, command execution must join the cgroup first.
+    # This makes non-interactive tests exercise the same cgroup-BPF hooks
+    # that an interactive shell would.
+    echo $$ > "$CG_ROOT/$name/cgroup.procs"
+
+    exec nsenter -t "$pid" -p -m -u -- "$@"
+}
+
 destroy_container() {
     local name=${1:?usage: $0 destroy <name>}
+    validate_name "$name"
     local pidfile="$STATE_DIR/$name.pid"
 
     [[ -f $pidfile ]] || { echo "no such container: $name" >&2; exit 1; }
@@ -112,10 +172,12 @@ destroy_container() {
 }
 
 main() {
+    require_root
     local cmd=${1:-}
     case "$cmd" in
         create)
             local name=${2:?usage: $0 create <name>}
+            validate_name "$name"
             create_cgroup "$name"
             start_container "$name"
             ;;
@@ -123,12 +185,16 @@ main() {
             local name=${2:?usage: $0 enter <name>}
             enter_container "$name"
             ;;
+        exec)
+            shift
+            exec_container "$@"
+            ;;
         destroy)
             local name=${2:?usage: $0 destroy <name>}
             destroy_container "$name"
             ;;
         *)
-            echo "usage: $0 {create|enter|destroy} <name>" >&2
+            usage
             exit 1
             ;;
     esac

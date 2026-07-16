@@ -4,30 +4,58 @@ A container is not a box. It is a **process wearing isolation**: a few
 namespaces (what it can *see*) plus a cgroup slice (where the kernel
 *accounts and controls* it — and where eBPF programs attach).
 
-`container-runtime.sh` is a tiny container runtime — under 150 lines of
-bash — with three verbs:
+`container-runtime.sh` is a tiny container runtime — under 200 lines of
+bash — with four verbs:
 
 ```
 ./container-runtime.sh create  c1     # cgroup slice + namespaces + init
 ./container-runtime.sh enter   c1     # a shell inside (like docker exec)
+./container-runtime.sh exec    c1 hostname
 ./container-runtime.sh destroy c1     # kill + clean up
 ```
 
 ## Run it
 
 ```bash
-./container-runtime.sh create c1
+sudo ./container-runtime.sh create c1
 cat /run/containers/c1.pid            # the container's init, host view
 systemd-cgls | grep -A3 lab           # the cgroup slice, with the init in it
 
-./container-runtime.sh enter c1
+sudo ./container-runtime.sh enter c1
 # prompt: root@c1
 ps aux                                # PID 1 is sleep — a two-line world
 hostname                              # c1
 cat /proc/self/cgroup                 # .../lab/c1
 exit
 
-./container-runtime.sh destroy c1
+sudo ./container-runtime.sh destroy c1
+```
+
+## Non-interactive execution
+
+Use `exec` when a later lab or test script needs to run one command inside the
+container without opening an interactive shell:
+
+```bash
+sudo ./container-runtime.sh create c1
+sudo ./container-runtime.sh exec c1 hostname
+sudo ./container-runtime.sh exec c1 cat /proc/self/cgroup
+sudo ./container-runtime.sh destroy c1
+```
+
+`exec` joins the container cgroup before calling `nsenter`, just like `enter`.
+That is the behavior later cgroup-BPF labs need.
+
+## Verify it
+
+```bash
+sudo ./verify.sh
+```
+
+Or with Make:
+
+```bash
+sudo make verify
 ```
 
 ## What to notice
@@ -38,6 +66,10 @@ exit
 - **The cgroup is just a directory.** `ls /sys/fs/cgroup/lab/c1/` —
   membership is PIDs listed in `cgroup.procs`. This directory is where
   eBPF programs will attach in the next exercise.
+- **Namespaces are not cgroups.** `enter` and `exec` call `nsenter` for the
+  pid/mount/uts namespaces, but they also write the caller into
+  `cgroup.procs`. Without that cgroup move, later cgroup-BPF programs would
+  not see traffic from the shell or command.
 
 ## Questions
 

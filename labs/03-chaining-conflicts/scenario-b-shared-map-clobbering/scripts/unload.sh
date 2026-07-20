@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONTAINER="${CONTAINER:-c1}"
+CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
+ATTACH_TYPE="${ATTACH_TYPE:-cgroup_inet4_connect}"
+A_PIN="${A_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_writer_a}"
+B_PIN="${B_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_writer_b}"
+MAP_PIN="${MAP_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_shared_values}"
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  echo "unload.sh must run as root" >&2
+  exit 1
+fi
+
+command -v bpftool >/dev/null || {
+  echo "bpftool is required" >&2
+  exit 1
+}
+
+if [[ -d "$CGROUP_PATH" && -e "$B_PIN" ]]; then
+  bpftool cgroup detach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$B_PIN" 2>/dev/null || true
+fi
+
+if [[ -d "$CGROUP_PATH" && -e "$A_PIN" ]]; then
+  bpftool cgroup detach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$A_PIN" 2>/dev/null || true
+fi
+
+rm -f "$A_PIN" "$B_PIN" "$MAP_PIN"
+echo "Scenario B cleanup complete"

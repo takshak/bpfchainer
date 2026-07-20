@@ -11,4 +11,7 @@ sudo make verify
 cd ../02-cgroup-bpf-attach
 make all
 sudo make verify
+
+cd ../03-chaining-conflicts
+sudo make verify
 ```

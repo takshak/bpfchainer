@@ -4,8 +4,8 @@ set -euo pipefail
 CONTAINER="${CONTAINER:-c1}"
 CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
 ATTACH_TYPE="${ATTACH_TYPE:-cgroup_inet4_connect}"
-A_PIN="${A_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_writer_a}"
-B_PIN="${B_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_writer_b}"
+DENY_PIN="${DENY_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_deny_writer}"
+ALLOW_PIN="${ALLOW_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_allow_writer}"
 MAP_PIN="${MAP_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_shared_values}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -18,13 +18,13 @@ command -v bpftool >/dev/null || {
   exit 1
 }
 
-if [[ -d "$CGROUP_PATH" && -e "$B_PIN" ]]; then
-  bpftool cgroup detach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$B_PIN" 2>/dev/null || true
+if [[ -d "$CGROUP_PATH" && -e "$ALLOW_PIN" ]]; then
+  bpftool cgroup detach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$ALLOW_PIN" 2>/dev/null || true
 fi
 
-if [[ -d "$CGROUP_PATH" && -e "$A_PIN" ]]; then
-  bpftool cgroup detach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$A_PIN" 2>/dev/null || true
+if [[ -d "$CGROUP_PATH" && -e "$DENY_PIN" ]]; then
+  bpftool cgroup detach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$DENY_PIN" 2>/dev/null || true
 fi
 
-rm -f "$A_PIN" "$B_PIN" "$MAP_PIN"
+rm -f "$DENY_PIN" "$ALLOW_PIN" "$MAP_PIN"
 echo "Scenario B cleanup complete"

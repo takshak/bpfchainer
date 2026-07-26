@@ -8,7 +8,7 @@ BPF_SRCS := $(wildcard src/*.bpf.c)
 BPF_OBJS := $(patsubst src/%.bpf.c,$(OUTPUT)/%.bpf.o,$(BPF_SRCS))
 BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH)
 
-.PHONY: all clean doctor load_a_last load_b_last unload verify verify_a_last verify_b_last
+.PHONY: all clean doctor load unload show verify
 
 all: doctor $(BPF_OBJS)
 
@@ -27,25 +27,20 @@ $(OUTPUT):
 $(OUTPUT)/vmlinux.h: | $(OUTPUT)
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $@
 
-$(OUTPUT)/%.bpf.o: src/%.bpf.c src/bpf_helpers_min.h $(OUTPUT)/vmlinux.h | $(OUTPUT)
+$(OUTPUT)/%.bpf.o: src/%.bpf.c src/bpf_helpers_min.h src/shared_state.h $(OUTPUT)/vmlinux.h | $(OUTPUT)
 	$(CLANG) $(BPF_CFLAGS) -I$(OUTPUT) -Isrc -c $< -o $@
 
-verify_a_last: $(BPF_OBJS)
-	./scripts/verify_order.sh b-a
+verify: $(BPF_OBJS)
+	./scripts/verify_order.sh
 
-verify_b_last: $(BPF_OBJS)
-	./scripts/verify_order.sh a-b
-
-verify: verify_a_last verify_b_last
-
-load_a_last: $(BPF_OBJS)
-	./scripts/load_order.sh b-a
-
-load_b_last: $(BPF_OBJS)
-	./scripts/load_order.sh a-b
+load: $(BPF_OBJS)
+	./scripts/load_order.sh
 
 unload:
 	./scripts/unload.sh
+
+show:
+	./scripts/show_state.sh
 
 clean:
 	rm -rf $(OUTPUT)

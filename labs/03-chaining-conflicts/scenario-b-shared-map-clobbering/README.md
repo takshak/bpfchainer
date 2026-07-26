@@ -1,27 +1,38 @@
-# Scenario B — Shared Map Key Clobbering
+# Scenario B — Shared Map Side-Effect Conflict
 
-This scenario shows that shared BPF maps do not provide ownership boundaries.
+This scenario shows that a cgroup-BPF verdict and BPF side effects are separate.
 
 Two `cgroup/connect4` programs attach to the same Lab 01 container cgroup with
-`BPF_ALLOW_MULTI`. Both write to the same pinned array map when an IPv4 connect
-targets port `45679`:
+`BPF_ALLOW_MULTI`:
 
-- key `0`
-- `writer_a` writes value `10`
-- `writer_b` writes value `11`
+- `deny_writer` runs first, writes `final_decision = DENY`, and returns `0`.
+- `allow_writer` runs second, writes `final_decision = ALLOW`, and returns `1`.
 
-Both programs return `1`, so they allow the connection attempt. The connection
-result is not the point of this lab. The point is that final shared map state
-depends on attach order.
+The final connection result is still denied because the earlier deny verdict is
+sticky for `cgroup/connect4`. But the shared map says the final decision was
+allow, because the later program still ran and overwrote the shared state.
+
+```text
+kernel verdict:    DENIED / EPERM
+shared map state:  ALLOW
+```
+
+Takeaway: `BPF_ALLOW_MULTI` does not provide transactionality or side-effect
+isolation. A later program may not override an earlier deny verdict, but it can
+still mutate shared maps and leave misleading state behind.
+
+This scenario does not require kernel tracing. Verification reads the pinned
+shared map.
 
 ## Files
 
 ```text
-src/writer_a.bpf.c       writes shared_values[0] = 10
-src/writer_b.bpf.c       writes shared_values[0] = 11
-scripts/load_order.sh    creates the shared pinned map and attaches in order
-scripts/unload.sh        detaches, unpins programs, and removes the shared map
-scripts/verify_order.sh  verifies both attach orders
+src/deny_writer.bpf.c     writes shared_values[0].final_decision = DENY and returns 0
+src/allow_writer.bpf.c    writes shared_values[0].final_decision = ALLOW and returns 1
+scripts/load_order.sh     creates the shared pinned map and attaches deny then allow
+scripts/show_state.sh     reads final_decision, last_writer, and writer counters
+scripts/unload.sh         detaches, unpins programs, and removes the shared map
+scripts/verify_order.sh   verifies the denied connection plus overwritten map state
 ```
 
 ## One-command Verification
@@ -33,11 +44,20 @@ sudo make verify
 
 Expected behavior:
 
-- `b-a`: `writer_b` runs first, `writer_a` runs last, final map value is `10`.
-- `a-b`: `writer_a` runs first, `writer_b` runs last, final map value is `11`.
+```text
+connect_errno=1
+final_decision=1
+last_writer=1
+deny_count=1
+allow_count=1
+```
 
-This is deterministic clobbering for one hook invocation, not random memory
-corruption. The bug pattern is shared state without ownership boundaries.
+The important contradiction is:
+
+```text
+connect_errno=1      # kernel denied the connect
+final_decision=1     # shared map says allow
+```
 
 ## Manual Demo With `c1`
 
@@ -48,12 +68,12 @@ cd ../../01-container
 sudo ./container-runtime.sh create c1
 ```
 
-Load with `writer_b` attached last:
+Load Scenario B:
 
 ```bash
 cd ../03-chaining-conflicts/scenario-b-shared-map-clobbering
 make all
-sudo CONTAINER=c1 make load_b_last
+sudo CONTAINER=c1 make load
 ```
 
 Trigger one connect to port `45679`:
@@ -67,53 +87,31 @@ s.settimeout(1)
 try:
     s.connect(("127.0.0.1", 45679))
 except OSError as exc:
-    print(exc)
+    print(f"connect failed: errno={exc.errno} error={exc}")
 finally:
     s.close()
 PY
 ```
 
-Dump the shared map:
-
-```bash
-sudo bpftool map dump pinned /sys/fs/bpf/bpfchainer_lab03b_c1_shared_values
-```
-
-Expected final value when `writer_b` runs last:
+Expected command output:
 
 ```text
-0b 00 00 00
+connect failed: errno=1 error=[Errno 1] Operation not permitted
 ```
 
-Reverse the order so `writer_a` runs last:
+Show the shared map:
 
 ```bash
-sudo CONTAINER=c1 make unload
-sudo CONTAINER=c1 make load_a_last
+sudo CONTAINER=c1 make show
 ```
 
-Trigger again and dump the map:
-
-```bash
-sudo ../../01-container/container-runtime.sh exec c1 python3 - <<'PY'
-import socket
-
-s = socket.socket()
-s.settimeout(1)
-try:
-    s.connect(("127.0.0.1", 45679))
-except OSError as exc:
-    print(f"connect expectedly failed: {exc}")
-finally:
-    s.close()
-PY
-sudo bpftool map dump pinned /sys/fs/bpf/bpfchainer_lab03b_c1_shared_values
-```
-
-Expected final value when `writer_a` runs last:
+Expected map output:
 
 ```text
-0a 00 00 00
+final_decision=1
+last_writer=1
+deny_count=1
+allow_count=1
 ```
 
 ## Cleanup
@@ -127,8 +125,8 @@ sudo CONTAINER=c1 make unload
 This removes:
 
 ```text
-/sys/fs/bpf/bpfchainer_lab03b_c1_writer_a
-/sys/fs/bpf/bpfchainer_lab03b_c1_writer_b
+/sys/fs/bpf/bpfchainer_lab03b_c1_deny_writer
+/sys/fs/bpf/bpfchainer_lab03b_c1_allow_writer
 /sys/fs/bpf/bpfchainer_lab03b_c1_shared_values
 ```
 

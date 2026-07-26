@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ORDER="${1:?expected order: a-b or b-a}"
 RUNTIME="${RUNTIME:-../../01-container/container-runtime.sh}"
 CONTAINER="${CONTAINER:-lab3b-verify-$$}"
 CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
 MAP_PIN="${MAP_PIN:-/sys/fs/bpf/bpfchainer_lab03b_${CONTAINER}_shared_values}"
-TRACEFS_PATH="${TRACEFS_PATH:-/sys/kernel/tracing}"
 PORT="${PORT:-45679}"
-TRACE_LOG="$(mktemp)"
 RESULT_LOG="$(mktemp)"
-MAP_JSON="$(mktemp)"
+STATE_LOG="$(mktemp)"
 OWN_CONTAINER=0
 
 cleanup() {
@@ -18,7 +15,7 @@ cleanup() {
   if [[ "$OWN_CONTAINER" -eq 1 ]]; then
     "$RUNTIME" destroy "$CONTAINER" >/dev/null 2>&1 || true
   fi
-  rm -f "$TRACE_LOG" "$RESULT_LOG" "$MAP_JSON"
+  rm -f "$RESULT_LOG" "$STATE_LOG"
 }
 trap cleanup EXIT
 
@@ -27,27 +24,15 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-for cmd in bpftool python3 timeout; do
+for cmd in bpftool python3; do
   command -v "$cmd" >/dev/null || {
     echo "missing required command: $cmd" >&2
     exit 1
   }
 done
 
-case "$ORDER" in
-  a-b)
-    EXPECT_VALUE=11
-    EXPECT_WRITER="writer_b"
-    ;;
-  b-a)
-    EXPECT_VALUE=10
-    EXPECT_WRITER="writer_a"
-    ;;
-  *)
-    echo "unknown order: $ORDER" >&2
-    exit 1
-    ;;
-esac
+EXPECT_FINAL_DECISION=1
+EXPECT_LAST_WRITER=1
 
 [[ -x "$RUNTIME" ]] || {
   echo "missing executable Lab 1 runtime: $RUNTIME" >&2
@@ -59,13 +44,7 @@ if [[ ! -d "$CGROUP_PATH" ]]; then
   OWN_CONTAINER=1
 fi
 
-CONTAINER="$CONTAINER" CGROUP_PATH="$CGROUP_PATH" MAP_PIN="$MAP_PIN" ./scripts/load_order.sh "$ORDER"
-
-: > "$TRACEFS_PATH/trace"
-timeout 5 cat "$TRACEFS_PATH/trace_pipe" >"$TRACE_LOG" 2>&1 &
-TRACE_PID=$!
-
-sleep 1
+CONTAINER="$CONTAINER" CGROUP_PATH="$CGROUP_PATH" MAP_PIN="$MAP_PIN" ./scripts/load_order.sh
 
 set +e
 "$RUNTIME" exec "$CONTAINER" python3 - "$PORT" >"$RESULT_LOG" 2>&1 <<'PY'
@@ -85,62 +64,47 @@ finally:
     sock.close()
 PY
 RESULT_STATUS=$?
-wait "$TRACE_PID"
-TRACE_STATUS=$?
 set -e
 
-bpftool -j map dump pinned "$MAP_PIN" >"$MAP_JSON"
-ACTUAL_VALUE="$(python3 - "$MAP_JSON" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    data = json.load(f)
-
-if not data:
-    raise SystemExit("map dump is empty")
-
-value = data[0]["value"]
-raw = bytes(int(byte, 16) if isinstance(byte, str) else int(byte) for byte in value)
-print(int.from_bytes(raw, "little"))
-PY
-)"
+CONTAINER="$CONTAINER" MAP_PIN="$MAP_PIN" ./scripts/show_state.sh >"$STATE_LOG"
+ACTUAL_FINAL_DECISION="$(awk -F= '$1 == "final_decision" { print $2 }' "$STATE_LOG")"
+ACTUAL_LAST_WRITER="$(awk -F= '$1 == "last_writer" { print $2 }' "$STATE_LOG")"
+DENY_COUNT="$(awk -F= '$1 == "deny_count" { print $2 }' "$STATE_LOG")"
+ALLOW_COUNT="$(awk -F= '$1 == "allow_count" { print $2 }' "$STATE_LOG")"
 
 echo "Connect result:"
 cat "$RESULT_LOG"
-echo "Trace output:"
-cat "$TRACE_LOG"
-echo "Map dump:"
-cat "$MAP_JSON"
-echo "expected_final_writer=$EXPECT_WRITER"
-echo "expected_final_value=$EXPECT_VALUE"
-echo "actual_final_value=$ACTUAL_VALUE"
+echo "BPF map state:"
+cat "$STATE_LOG"
+echo "expected_connection_errno=1"
+echo "expected_final_decision=$EXPECT_FINAL_DECISION"
+echo "actual_final_decision=$ACTUAL_FINAL_DECISION"
 
 [[ "$RESULT_STATUS" -eq 0 ]] || {
   echo "container exec trigger failed" >&2
   exit 1
 }
 
-[[ "$TRACE_STATUS" -eq 0 || "$TRACE_STATUS" -eq 124 ]] || {
-  echo "failed to read trace output" >&2
+grep -q "connect_errno=1" "$RESULT_LOG" || {
+  echo "expected denied connection with EPERM/connect_errno=1" >&2
   exit 1
 }
 
-grep -q "scenario_b writer_a" "$TRACE_LOG" || {
-  echo "writer_a did not run" >&2
-  exit 1
-}
-
-grep -q "scenario_b writer_b" "$TRACE_LOG" || {
-  echo "writer_b did not run" >&2
-  exit 1
-}
-
-if [[ "$ACTUAL_VALUE" -ne "$EXPECT_VALUE" ]]; then
-  echo "unexpected final map value for order $ORDER" >&2
+if [[ "$DENY_COUNT" != "1" || "$ALLOW_COUNT" != "1" ]]; then
+  echo "expected deny and allow writers to run exactly once" >&2
   exit 1
 fi
 
-echo "Scenario B verification passed for $ORDER"
+if [[ "$ACTUAL_LAST_WRITER" -ne "$EXPECT_LAST_WRITER" ]]; then
+  echo "unexpected last_writer" >&2
+  exit 1
+fi
+
+if [[ "$ACTUAL_FINAL_DECISION" -ne "$EXPECT_FINAL_DECISION" ]]; then
+  echo "unexpected final_decision" >&2
+  exit 1
+fi
+
+echo "Scenario B verification passed"
 echo "container=$CONTAINER"
 echo "cgroup=$CGROUP_PATH"

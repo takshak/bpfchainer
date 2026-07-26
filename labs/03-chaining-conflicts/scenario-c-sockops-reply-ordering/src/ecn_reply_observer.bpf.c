@@ -4,7 +4,6 @@
 
 #define BPF_SOCK_OPS_NEEDS_ECN 6
 #define STATE_KEY 0
-#define WRITER_ON 2
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -14,7 +13,7 @@ struct {
 } sockops_state SEC(".maps");
 
 SEC("sockops")
-int ecn_reply_on(struct bpf_sock_ops *skops)
+int ecn_reply_observer(struct bpf_sock_ops *skops)
 {
 	if (skops->op == BPF_SOCK_OPS_NEEDS_ECN) {
 		__u32 key = STATE_KEY;
@@ -25,12 +24,9 @@ int ecn_reply_on(struct bpf_sock_ops *skops)
 		if (old)
 			next = *old;
 
-		next.needs_ecn_calls++;
-		next.on_count++;
-		next.last_writer = WRITER_ON;
+		next.observer_count++;
+		next.final_reply = skops->reply;
 		bpf_map_update_elem(&sockops_state, &key, &next, BPF_ANY);
-
-		skops->reply = 1;
 	}
 
 	return 1;

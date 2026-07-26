@@ -3,10 +3,11 @@ set -euo pipefail
 
 ORDER="${1:?expected order: off-on or on-off}"
 RUNTIME="${RUNTIME:-../../01-container/container-runtime.sh}"
-CONTAINER="${CONTAINER:-lab3c-verify-$$}"
+CONTAINER="${CONTAINER:-lab3c-tcpdump-$$}"
 CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
 MAP_PIN="${MAP_PIN:-/sys/fs/bpf/bpfchainer_lab03c_${CONTAINER}_sockops_state}"
 PORT="${PORT:-45678}"
+TCPDUMP_LOG="$(mktemp)"
 SERVER_LOG="$(mktemp)"
 CLIENT_LOG="$(mktemp)"
 STATE_LOG="$(mktemp)"
@@ -21,30 +22,28 @@ cleanup() {
   if [[ "$OWN_CONTAINER" -eq 1 ]]; then
     "$RUNTIME" destroy "$CONTAINER" >/dev/null 2>&1 || true
   fi
-  rm -f "$SERVER_LOG" "$CLIENT_LOG" "$STATE_LOG"
+  rm -f "$TCPDUMP_LOG" "$SERVER_LOG" "$CLIENT_LOG" "$STATE_LOG"
 }
 trap cleanup EXIT
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "verify_order.sh must run as root" >&2
+  echo "demo_tcpdump.sh must run as root" >&2
   exit 1
 fi
 
-for cmd in bpftool python3 sysctl; do
+for cmd in bpftool python3 sysctl tcpdump timeout; do
   command -v "$cmd" >/dev/null || {
-    echo "missing required command: $cmd" >&2
+    echo "missing required command for optional tcpdump demo: $cmd" >&2
     exit 1
   }
 done
 
 case "$ORDER" in
   off-on)
-    EXPECT_REPLY=1
-    EXPECT_LAST_WRITER=2
+    EXPECT_ECN=1
     ;;
   on-off)
-    EXPECT_REPLY=0
-    EXPECT_LAST_WRITER=1
+    EXPECT_ECN=0
     ;;
   *)
     echo "unknown order: $ORDER" >&2
@@ -58,7 +57,7 @@ esac
 }
 
 if ! sysctl -n net.ipv4.tcp_available_congestion_control | grep -qw cubic; then
-  echo "cubic congestion control is required for this verifier" >&2
+  echo "cubic congestion control is required for this demo" >&2
   exit 1
 fi
 
@@ -71,6 +70,11 @@ if [[ ! -d "$CGROUP_PATH" ]]; then
 fi
 
 CONTAINER="$CONTAINER" CGROUP_PATH="$CGROUP_PATH" MAP_PIN="$MAP_PIN" ./scripts/load_order.sh "$ORDER"
+
+timeout 6 tcpdump -i lo -nnvvv -c 4 "tcp and port $PORT" >"$TCPDUMP_LOG" 2>&1 &
+TCPDUMP_PID=$!
+
+sleep 1
 
 "$RUNTIME" exec "$CONTAINER" python3 - "$PORT" >"$SERVER_LOG" 2>&1 <<'PY' &
 import socket
@@ -94,6 +98,7 @@ sleep 0.4
 "$RUNTIME" exec "$CONTAINER" python3 - "$PORT" >"$CLIENT_LOG" 2>&1 <<'PY'
 import socket
 import sys
+import time
 
 port = int(sys.argv[1])
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -103,57 +108,48 @@ client.connect(("127.0.0.1", port))
 cc = client.getsockopt(socket.IPPROTO_TCP, socket.TCP_CONGESTION, 32)
 print("client_cc=" + cc.rstrip(b"\x00").decode("ascii", "replace"))
 client.send(b"x")
+time.sleep(0.2)
 client.close()
 PY
 
 wait "$SERVER_PID"
+wait "$TCPDUMP_PID" || true
 
 CONTAINER="$CONTAINER" MAP_PIN="$MAP_PIN" ./scripts/show_state.sh >"$STATE_LOG"
 
-NEEDS_ECN_CALLS="$(awk -F= '$1 == "needs_ecn_calls" { print $2 }' "$STATE_LOG")"
-OFF_COUNT="$(awk -F= '$1 == "off_count" { print $2 }' "$STATE_LOG")"
-ON_COUNT="$(awk -F= '$1 == "on_count" { print $2 }' "$STATE_LOG")"
-OBSERVER_COUNT="$(awk -F= '$1 == "observer_count" { print $2 }' "$STATE_LOG")"
-FINAL_REPLY="$(awk -F= '$1 == "final_reply" { print $2 }' "$STATE_LOG")"
-LAST_WRITER="$(awk -F= '$1 == "last_writer" { print $2 }' "$STATE_LOG")"
+FIRST_SYN_FLAGS="$(
+  awk '
+    /Flags \[/ {
+      flags = $0
+      sub(/^.*Flags \[/, "", flags)
+      sub(/\].*$/, "", flags)
+      if (index(flags, "S") > 0) {
+        print flags
+        exit
+      }
+    }
+  ' "$TCPDUMP_LOG"
+)"
+
+if [[ "$FIRST_SYN_FLAGS" == *E* && "$FIRST_SYN_FLAGS" == *W* ]]; then
+  SEEN_ECN=1
+else
+  SEEN_ECN=0
+fi
 
 echo "Client output:"
 cat "$CLIENT_LOG"
 echo "BPF map state:"
 cat "$STATE_LOG"
-echo "expected_final_reply=$EXPECT_REPLY"
-echo "actual_final_reply=$FINAL_REPLY"
+echo "Tcpdump output:"
+cat "$TCPDUMP_LOG"
+echo "expected_ecn=$EXPECT_ECN"
+echo "seen_ecn=$SEEN_ECN"
+echo "first_syn_flags=${FIRST_SYN_FLAGS:-missing}"
 
-grep -q "client_cc=cubic" "$CLIENT_LOG" || {
-  echo "test socket did not use cubic" >&2
-  exit 1
-}
-
-if [[ -z "$NEEDS_ECN_CALLS" || "$NEEDS_ECN_CALLS" -lt 1 ]]; then
-  echo "expected BPF_SOCK_OPS_NEEDS_ECN to run" >&2
+if [[ "$SEEN_ECN" -ne "$EXPECT_ECN" ]]; then
+  echo "unexpected ECN SYN flags for order $ORDER" >&2
   exit 1
 fi
 
-if [[ -z "$OFF_COUNT" || "$OFF_COUNT" -lt 1 || -z "$ON_COUNT" || "$ON_COUNT" -lt 1 ]]; then
-  echo "expected both writer programs to run" >&2
-  exit 1
-fi
-
-if [[ -z "$OBSERVER_COUNT" || "$OBSERVER_COUNT" -lt 1 ]]; then
-  echo "expected observer program to run" >&2
-  exit 1
-fi
-
-if [[ "$FINAL_REPLY" -ne "$EXPECT_REPLY" ]]; then
-  echo "unexpected final skops->reply for order $ORDER" >&2
-  exit 1
-fi
-
-if [[ "$LAST_WRITER" -ne "$EXPECT_LAST_WRITER" ]]; then
-  echo "unexpected last_writer for order $ORDER" >&2
-  exit 1
-fi
-
-echo "Scenario C verification passed for $ORDER"
-echo "container=$CONTAINER"
-echo "cgroup=$CGROUP_PATH"
+echo "Scenario C tcpdump demo passed for $ORDER"

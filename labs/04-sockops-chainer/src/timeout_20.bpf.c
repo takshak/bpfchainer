@@ -9,7 +9,6 @@ int timeout_20(struct bpf_sock_ops *skops)
 {
 	if (skops->op == BPF_SOCK_OPS_TIMEOUT_INIT) {
 		skops->reply = 20;
-		bpf_printk("lab04 timeout_20 wrote reply=20\n");
 	}
 
 	return BCF_PASS;

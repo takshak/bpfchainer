@@ -22,6 +22,9 @@ The chainer calls slots in numeric priority order. Extension programs are
 attached to a slot using `BPF_PROG_TYPE_EXT` / `freplace`. Load order no longer
 decides the result.
 
+This lab does not require kernel tracing or `trace_pipe`. Verification reads the
+chainer's pinned state map through `chainctl`.
+
 ## Policy
 
 The lab implements one mediation policy:

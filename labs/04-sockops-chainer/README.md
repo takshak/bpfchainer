@@ -25,6 +25,11 @@ decides the result.
 This lab does not require kernel tracing or `trace_pipe`. Verification reads the
 chainer's pinned state map through `chainctl`.
 
+Lab 4 does require kernel support for BPF extension programs
+(`BPF_PROG_TYPE_EXT`) and `freplace`. If the chainer loads but attaching
+`timeout_10` or `timeout_20` fails, the VM kernel may not support the production
+style replacement mechanism used by this lab.
+
 ## Policy
 
 The lab implements one mediation policy:
@@ -159,6 +164,36 @@ Destroy the Lab 1 container when you are done with all labs:
 cd ../01-container
 sudo ./container-runtime.sh destroy c1
 ```
+
+## Troubleshooting
+
+If `make verify` fails while loading `timeout_10.bpf.o` or
+`timeout_20.bpf.o`, rebuild and rerun. `chainctl` prints the kernel verifier log
+for extension load failures:
+
+```bash
+make clean
+make all
+sudo make verify
+```
+
+Useful feature checks:
+
+```bash
+bpftool feature probe kernel | grep -E 'ext|tracing|BPF_PROG_TYPE_EXT|BPF_LINK_TYPE_TRACING'
+cat /proc/sys/net/core/bpf_jit_enable 2>/dev/null || true
+```
+
+Expected Lab 4 support:
+
+```text
+BPF_PROG_TYPE_EXT available
+BPF_LINK_TYPE_TRACING / freplace support available
+BPF JIT enabled when the kernel requires it for trampolines
+```
+
+If those are missing, Labs 1-3 can still run, but Lab 4's production-style
+`freplace` chainer cannot be demonstrated on that VM kernel.
 
 ## Files
 

@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define LOG_BUF_SIZE (1024 * 1024)
+
 struct lab04_chainer_state {
 	uint32_t calls;
 	uint32_t last_op;
@@ -19,6 +21,34 @@ struct lab04_chainer_state {
 	uint32_t writer_count;
 	uint32_t double_writer_count;
 };
+
+static char kernel_log_buf[LOG_BUF_SIZE];
+
+static void clear_kernel_log(void)
+{
+	kernel_log_buf[0] = '\0';
+}
+
+static void print_kernel_log(const char *context)
+{
+	if (kernel_log_buf[0] == '\0')
+		return;
+
+	fprintf(stderr, "\n%s verifier log:\n%s\n", context, kernel_log_buf);
+}
+
+static struct bpf_object *open_bpf_object_with_log(const char *path)
+{
+	struct bpf_object_open_opts opts = {};
+
+	clear_kernel_log();
+	opts.sz = sizeof(opts);
+	opts.kernel_log_buf = kernel_log_buf;
+	opts.kernel_log_size = sizeof(kernel_log_buf);
+	opts.kernel_log_level = 0;
+
+	return bpf_object__open_file(path, &opts);
+}
 
 static void usage(const char *prog)
 {
@@ -138,7 +168,7 @@ static int do_load_chainer(const char *cgroup_path, const char *obj_path,
 		return -errno;
 	}
 
-	obj = bpf_object__open_file(obj_path, NULL);
+	obj = open_bpf_object_with_log(obj_path);
 	err = libbpf_get_error(obj);
 	if (err) {
 		fprintf(stderr, "open BPF object %s: %s\n", obj_path, strerror(-err));
@@ -148,6 +178,7 @@ static int do_load_chainer(const char *cgroup_path, const char *obj_path,
 	err = bpf_object__load(obj);
 	if (err) {
 		fprintf(stderr, "load BPF object %s: %s\n", obj_path, strerror(-err));
+		print_kernel_log("chainer load");
 		goto out;
 	}
 
@@ -248,7 +279,7 @@ static int do_attach_ext(const char *pin_dir, const char *obj_path,
 		return -errno;
 	}
 
-	obj = bpf_object__open_file(obj_path, NULL);
+	obj = open_bpf_object_with_log(obj_path);
 	err = libbpf_get_error(obj);
 	if (err) {
 		fprintf(stderr, "open extension object %s: %s\n", obj_path, strerror(-err));
@@ -271,6 +302,12 @@ static int do_attach_ext(const char *pin_dir, const char *obj_path,
 	err = bpf_object__load(obj);
 	if (err) {
 		fprintf(stderr, "load extension object %s: %s\n", obj_path, strerror(-err));
+		print_kernel_log("extension load");
+		fprintf(stderr,
+			"\nThis failure is from loading a BPF_PROG_TYPE_EXT/freplace program.\n"
+			"If the verifier log mentions unsupported program type, trampoline,\n"
+			"or attach_btf_id, this VM kernel likely lacks the freplace support\n"
+			"needed by Lab 4.\n");
 		goto out;
 	}
 

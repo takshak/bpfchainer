@@ -6,6 +6,8 @@ CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
 ATTACH_TYPE="${ATTACH_TYPE:-cgroup_inet4_connect}"
 DENY_PIN="${DENY_PIN:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_deny}"
 ALLOW_PIN="${ALLOW_PIN:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_allow}"
+DENY_MAP_DIR="${DENY_MAP_DIR:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_deny_maps}"
+ALLOW_MAP_DIR="${ALLOW_MAP_DIR:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_allow_maps}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "unload.sh must run as root" >&2
@@ -26,4 +28,5 @@ if [[ -d "$CGROUP_PATH" && -e "$DENY_PIN" ]]; then
 fi
 
 rm -f "$ALLOW_PIN" "$DENY_PIN"
+rm -rf "$ALLOW_MAP_DIR" "$DENY_MAP_DIR"
 echo "Scenario A cleanup complete"

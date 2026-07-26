@@ -8,6 +8,8 @@ DENY_OBJ="${DENY_OBJ:-build/deny_connect4.bpf.o}"
 ALLOW_OBJ="${ALLOW_OBJ:-build/allow_connect4.bpf.o}"
 DENY_PIN="${DENY_PIN:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_deny}"
 ALLOW_PIN="${ALLOW_PIN:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_allow}"
+DENY_MAP_DIR="${DENY_MAP_DIR:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_deny_maps}"
+ALLOW_MAP_DIR="${ALLOW_MAP_DIR:-/sys/fs/bpf/bpfchainer_lab03a_${CONTAINER}_allow_maps}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "load_multi.sh must run as root" >&2
@@ -38,13 +40,18 @@ if ! mountpoint -q /sys/fs/bpf; then
   mount -t bpf bpf /sys/fs/bpf
 fi
 
-bpftool prog load "$DENY_OBJ" "$DENY_PIN" type cgroup/connect4
+rm -rf "$DENY_MAP_DIR" "$ALLOW_MAP_DIR"
+mkdir -p "$DENY_MAP_DIR" "$ALLOW_MAP_DIR"
+
+bpftool prog load "$DENY_OBJ" "$DENY_PIN" type cgroup/connect4 pinmaps "$DENY_MAP_DIR"
 bpftool cgroup attach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$DENY_PIN" multi
 
-bpftool prog load "$ALLOW_OBJ" "$ALLOW_PIN" type cgroup/connect4
+bpftool prog load "$ALLOW_OBJ" "$ALLOW_PIN" type cgroup/connect4 pinmaps "$ALLOW_MAP_DIR"
 bpftool cgroup attach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$ALLOW_PIN" multi
 
 echo "Attached with BPF_ALLOW_MULTI semantics in order:"
 echo "1. deny_connect4 -> $DENY_PIN"
 echo "2. allow_connect4 -> $ALLOW_PIN"
+echo "deny maps: $DENY_MAP_DIR"
+echo "allow maps: $ALLOW_MAP_DIR"
 echo "cgroup: $CGROUP_PATH"

@@ -8,16 +8,17 @@ Two programs attach to the same Lab 01 container cgroup with `BPF_ALLOW_MULTI`:
 - `deny_connect4` returns `0` for destination port `1`.
 - `allow_connect4` always returns `1`.
 
-Both programs execute, but the final connect result is still denied.
+The deny program runs first and returns `0`. The allow program runs later and
+returns `1`. The final connection result is still denied.
 
 ```text
-deny returns 0
-allow returns 1
+deny runs, records deny_count=1, returns 0
+allow runs, records allow_count=1, returns 1
 final result: -EPERM
 ```
 
-Takeaway: for `cgroup/connect4`, deny is sticky. A later allow does not clear an
-earlier deny.
+Takeaway: for `cgroup/connect4`, return folding is not "last writer wins". A
+later allow does not clear an earlier deny.
 
 ## Files
 
@@ -26,6 +27,7 @@ src/deny_connect4.bpf.c    returns DENY for port 1
 src/allow_connect4.bpf.c   always returns ALLOW
 scripts/load_multi.sh      loads both programs and attaches deny first
 scripts/unload.sh          detaches and unpins only Scenario A programs
+scripts/show_state.sh      reads pinned BPF maps; no tracefs required
 scripts/verify.sh          creates a temporary Lab 01 container and tests EPERM
 kernel_flow.md             explains the relevant kernel return folding
 ```
@@ -40,13 +42,15 @@ sudo make verify
 Expected result:
 
 ```text
-scenario_a deny port=1 return=DENY
-scenario_a allow port=1 return=ALLOW
 connect_errno=1
+deny_count=1
+deny_last_port=1
+allow_count=1
+allow_last_port=1
 ```
 
-The important part is that both trace lines appear, but userspace still gets
-`EPERM`.
+The important part is that both programs ran, userspace still got `EPERM`, and
+the later allow did not override the earlier deny.
 
 ## Manual Demo With `c1`
 
@@ -69,12 +73,6 @@ Inspect the attachment order:
 
 ```bash
 sudo bpftool cgroup show /sys/fs/cgroup/lab/c1
-```
-
-In a second terminal, watch trace output:
-
-```bash
-sudo cat /sys/kernel/tracing/trace_pipe
 ```
 
 Trigger the effect:
@@ -101,11 +99,19 @@ Expected command output:
 connect failed: errno=1 error=[Errno 1] Operation not permitted
 ```
 
-Expected trace output:
+Observe BPF state through pinned maps:
+
+```bash
+sudo CONTAINER=c1 make show
+```
+
+Expected map output:
 
 ```text
-scenario_a deny port=1 return=DENY
-scenario_a allow port=1 return=ALLOW
+deny_count=1
+deny_last_port=1
+allow_count=1
+allow_last_port=1
 ```
 
 ## Cleanup
@@ -121,6 +127,8 @@ This removes:
 ```text
 /sys/fs/bpf/bpfchainer_lab03a_c1_deny
 /sys/fs/bpf/bpfchainer_lab03a_c1_allow
+/sys/fs/bpf/bpfchainer_lab03a_c1_deny_maps/
+/sys/fs/bpf/bpfchainer_lab03a_c1_allow_maps/
 ```
 
 It intentionally keeps `/sys/fs/cgroup/lab/c1` alive so you can run Scenario B

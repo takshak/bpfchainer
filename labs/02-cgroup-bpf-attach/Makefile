@@ -36,7 +36,7 @@ BPF_SRCS := $(wildcard src/*.bpf.c)
 BPF_OBJS := $(patsubst src/%.bpf.c,$(OUTPUT)/%.bpf.o,$(BPF_SRCS))
 BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH)
 
-.PHONY: all clean doctor load unload verify
+.PHONY: all clean doctor load unload show verify
 
 all: doctor $(BPF_OBJS)
 
@@ -63,6 +63,9 @@ load: $(OUTPUT)/cgroup_connect4.bpf.o
 
 unload:
 	./scripts/unload.sh
+
+show:
+	./scripts/show_state.sh
 
 verify: $(OUTPUT)/cgroup_connect4.bpf.o
 	CLANG="$(CLANG)" ./scripts/verify.sh $(OUTPUT)/cgroup_connect4.bpf.o

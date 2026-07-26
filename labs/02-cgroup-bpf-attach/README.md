@@ -15,9 +15,10 @@ container c1
 This lab does not create or destroy container cgroups during normal `load` and
 `unload`. Lab 01 owns container lifecycle. Lab 02 owns BPF program lifecycle.
 
-The example program allows every connection and prints a trace line only for
-IPv4 connects to destination port `45680`. Filtering to one lab port keeps the
-trace output deterministic while still demonstrating the attach point.
+The example program allows every connection and updates a small BPF map only
+for IPv4 connects to destination port `45680`. Filtering to one lab port keeps
+the output deterministic while still demonstrating the attach point. This lab
+does not require kernel tracing or `trace_pipe`.
 
 ## Build
 
@@ -43,7 +44,7 @@ The verifier:
 2. Loads and pins the `cgroup/connect4` BPF program.
 3. Attaches it to `/sys/fs/cgroup/lab/<temporary-container>`.
 4. Runs a Python `connect()` from inside the container with Lab 01 `exec`.
-5. Confirms the BPF program emitted a trace line.
+5. Confirms the BPF program updated its pinned state map.
 6. Detaches, unpins, and destroys the temporary container.
 
 ## Manual Flow
@@ -80,10 +81,17 @@ finally:
 PY
 ```
 
-Observe BPF output:
+Observe BPF output through the pinned map:
 
 ```bash
-sudo cat /sys/kernel/tracing/trace_pipe
+sudo CONTAINER=c1 make show
+```
+
+Expected output includes:
+
+```text
+connect_count=1
+last_port=45680
 ```
 
 Cleanup BPF state:
@@ -133,4 +141,4 @@ sudo CONTAINER=c1 make unload
 - `clang` with BPF target support
 - `bpftool`
 - `python3`
-- root privileges for BPF loading, cgroup attach, and trace output
+- root privileges for BPF loading and cgroup attach

@@ -4,6 +4,7 @@ set -euo pipefail
 CONTAINER="${CONTAINER:-c1}"
 CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
 PIN_PATH="${PIN_PATH:-/sys/fs/bpf/bpfchainer_lab02_${CONTAINER}_connect4}"
+MAP_PIN_DIR="${MAP_PIN_DIR:-/sys/fs/bpf/bpfchainer_lab02_${CONTAINER}_maps}"
 ATTACH_TYPE="${ATTACH_TYPE:-cgroup_inet4_connect}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -23,6 +24,11 @@ fi
 if [[ -e "$PIN_PATH" ]]; then
   rm -f "$PIN_PATH"
   echo "Removed pinned program: $PIN_PATH"
+fi
+
+if [[ -d "$MAP_PIN_DIR" ]]; then
+  rm -rf "$MAP_PIN_DIR"
+  echo "Removed pinned maps: $MAP_PIN_DIR"
 fi
 
 echo "Lab 02 cleanup complete"

@@ -5,6 +5,7 @@ OBJ_PATH="${1:-build/cgroup_connect4.bpf.o}"
 CONTAINER="${CONTAINER:-c1}"
 CGROUP_PATH="${CGROUP_PATH:-/sys/fs/cgroup/lab/$CONTAINER}"
 PIN_PATH="${PIN_PATH:-/sys/fs/bpf/bpfchainer_lab02_${CONTAINER}_connect4}"
+MAP_PIN_DIR="${MAP_PIN_DIR:-/sys/fs/bpf/bpfchainer_lab02_${CONTAINER}_maps}"
 ATTACH_TYPE="${ATTACH_TYPE:-cgroup_inet4_connect}"
 PROG_TYPE="${PROG_TYPE:-cgroup/connect4}"
 
@@ -39,9 +40,13 @@ if [[ -e "$PIN_PATH" ]]; then
   rm -f "$PIN_PATH"
 fi
 
-bpftool prog load "$OBJ_PATH" "$PIN_PATH" type "$PROG_TYPE"
+rm -rf "$MAP_PIN_DIR"
+mkdir -p "$MAP_PIN_DIR"
+
+bpftool prog load "$OBJ_PATH" "$PIN_PATH" type "$PROG_TYPE" pinmaps "$MAP_PIN_DIR"
 bpftool cgroup attach "$CGROUP_PATH" "$ATTACH_TYPE" pinned "$PIN_PATH"
 
 echo "Loaded $OBJ_PATH"
 echo "Pinned at $PIN_PATH"
+echo "Maps pinned under $MAP_PIN_DIR"
 echo "Attached to $CGROUP_PATH as $ATTACH_TYPE"

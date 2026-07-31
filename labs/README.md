@@ -15,8 +15,10 @@ chain with a live orchestrator.
 | 1 | `01-container` | Build a tiny container runtime (create / enter / exec / destroy) using cgroups + namespaces |
 | 2 | `02-cgroup-bpf-attach` | Compile, load, and attach a `cgroup/connect4` BPF program to a Lab 01 container cgroup |
 | 3 | `03-chaining-conflicts` | Attach multiple BPF programs and observe return folding, shared-map clobbering, and `sock_ops` ordering |
+| 4 | `04-sockops-chainer` | Attach one sockops chainer, add extension programs by priority slot, and mediate `skops->reply` deterministically |
+| 5 | `05-chainer-monitoring` | Emit ringbuf conflict events from a monitored chainer and inspect chain state |
 
-*(More exercises coming: inheritance, the chainer, the orchestrator.)*
+*(More exercises coming: inheritance and the orchestrator.)*
 
 ## Environment
 

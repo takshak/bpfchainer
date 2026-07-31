@@ -14,4 +14,12 @@ sudo make verify
 
 cd ../03-chaining-conflicts
 sudo make verify
+
+cd ../04-sockops-chainer
+make all
+sudo make verify
+
+cd ../05-chainer-monitoring
+make all
+sudo make verify
 ```

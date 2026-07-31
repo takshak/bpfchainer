@@ -13,7 +13,7 @@ BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH)
 CHAINCTL := $(OUTPUT)/chainctl
 MONITOR := $(OUTPUT)/monitor
 
-.PHONY: all clean doctor load attach_timeout_10 attach_timeout_20 attach_timeout_30 show show_chain reset unload monitor verify
+.PHONY: all clean doctor load attach_timeout_10 attach_timeout_20 attach_timeout_30 show show_chain reset unload monitor verify demo_setup demo_traffic demo_cleanup
 
 all: doctor $(BPF_OBJS) $(CHAINCTL) $(MONITOR)
 
@@ -72,6 +72,15 @@ unload:
 
 verify: all
 	./scripts/verify.sh
+
+demo_setup: all
+	./scripts/demo_setup.sh
+
+demo_traffic: all
+	./scripts/demo_traffic.sh
+
+demo_cleanup:
+	./scripts/demo_cleanup.sh
 
 clean:
 	rm -rf $(OUTPUT)

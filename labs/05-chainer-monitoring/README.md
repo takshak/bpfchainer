@@ -81,6 +81,73 @@ The verifier creates a temporary Lab 01 container, loads the monitored chainer,
 attaches extension programs, starts the ringbuf monitor, triggers TCP socket
 activity, verifies the events/state, and cleans up.
 
+## Three-Step Demo Flow
+
+For teaching, use the split makefiles. They keep setup, traffic, and cleanup
+as separate visible steps.
+
+Step 1 creates or reuses the Lab 01 container, loads the monitored chainer,
+attaches all three extension programs, resets the maps, and prints the chain:
+
+```bash
+sudo make -f Makefile.setup
+```
+
+This installs:
+
+```text
+slot 1 -> timeout_10
+slot 2 -> timeout_20
+slot 6 -> timeout_30
+```
+
+Step 2 sends one TCP connection inside the container. It also starts the
+ringbuf monitor, waits for two conflict events, and prints map/chain state:
+
+```bash
+sudo make -f Makefile.traffic
+```
+
+Expected monitor output includes:
+
+```text
+EVENT ... winner_slot=1 winner_reply=10 conflict_slot=2 conflict_reply=20 ...
+EVENT ... winner_slot=1 winner_reply=10 conflict_slot=6 conflict_reply=30 ...
+```
+
+Expected map state includes:
+
+```text
+selected_priority=1
+selected_reply=10
+conflict_event_count=2
+```
+
+Step 3 unloads Lab 05 BPF links/programs/pins and destroys the Lab 01
+container:
+
+```bash
+sudo make -f Makefile.cleanup
+```
+
+To preserve the container and remove only Lab 05 BPF state:
+
+```bash
+sudo DESTROY_CONTAINER=0 make -f Makefile.cleanup
+```
+
+Useful introspection commands after setup or traffic:
+
+```bash
+sudo make show_chain
+sudo make show
+```
+
+`make show_chain` uses pinned programs/links under
+`/sys/fs/bpf/bpfchainer_lab05_c1` to show the chainer and extension slots.
+`make show` uses `tools/chainctl show-state` to decode the chainer state map
+and then runs `bpftool cgroup show` for the container cgroup.
+
 ## Manual Demo
 
 Create a reusable Lab 01 container:

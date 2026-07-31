@@ -1,0 +1,5 @@
+CONTAINER ?= c1
+
+.PHONY: all
+all:
+	CONTAINER=$(CONTAINER) $(MAKE) -f Makefile demo_setup
